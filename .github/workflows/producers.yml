@@ -6,7 +6,7 @@ on:
       - tools/fetch_producers.py
       - .github/workflows/producers.yml
 permissions:
-  contents: read
+  contents: write
 jobs:
   fetch:
     runs-on: ubuntu-latest
@@ -17,8 +17,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: python tools/fetch_producers.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: produttori-grezzi
-          path: out/
-          retention-days: 3
+        continue-on-error: true
+      - name: Salva i dati grezzi nel ramo data-raw
+        run: |
+          cd out
+          git init -q -b data-raw
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Dati grezzi produttori $(date -u +%F)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data-raw
