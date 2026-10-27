@@ -264,7 +264,9 @@ const NOTES=[
 ["Santenay","Clos Rousseau","R","","Verso le Maranges, nella parte ovest del comune: rosso fragrante.",""]
 ];
 const NOTEMAP={};NOTES.forEach(n=>NOTEMAP[norm(n[0])+"|"+norm(n[1])]={col:n[2],own:n[3],note:n[4],prod:n[5]});
-const CL=DATA.climats.features.map(f=>{const p=f.properties;
+const CFIX={"Vosne-Romanee":"Vosne-Romanée","Premeaux-Prissey":"Prémeaux-Prissey","Flagey-Echezeaux":"Flagey-Échezeaux","Monthelie":"Monthélie","Marsannay-La-Cote":"Marsannay-la-Côte","Chenove":"Chenôve","Chorey-Les-Beaune":"Chorey-lès-Beaune","Savigny-Les-Beaune":"Savigny-lès-Beaune","Cheilly-Les-Maranges":"Cheilly-lès-Maranges","Dezize-Les-Maranges":"Dezize-lès-Maranges","Sampigny-Les-Maranges":"Sampigny-lès-Maranges","Magny-Les-Villers":"Magny-lès-Villers"};
+const fixC=n=>CFIX[n]||n.replace(/-Les-/g,"-lès-").replace(/-La-/g,"-la-");
+const CL=DATA.climats.features.map(f=>{const p=f.properties;p.c=p.c.map(fixC);
   const note=NOTEMAP[norm(p.a)+"|"+norm(p.raw)]||NOTEMAP[norm(p.raw)+"|"+norm(p.raw)]||null;
   let col=note?note.col:(p.t==="1C"?null:(p.k==="gcb"?"B":"R"));
   const pretty=s=>s.replace(/^Ile /,"Île ");
@@ -528,7 +530,7 @@ let booted=false;map.once("style.load",()=>setTimeout(boot,2500));
 map.on("load",boot);
 function boot(){if(booted)return;booted=true;updateNow();const h=decodeURIComponent((location.hash||"").slice(1));const c=h&&CL.find(x=>x.slug===h);
   if(c)select(c.id,{instant:true});else if(!reduceMotion)setTimeout(()=>{if(!interacting&&sel<0&&$("#list").hidden)setFlying(true);},1800);}
-map.on("error",e=>{const m=String(e&&e.error&&e.error.message||"");if(/geopf|openfreemap/i.test(m)&&!toast.err){toast.err=1;toast("Alcune mappe non rispondono: riprova tra poco");}});
+let errN=0,errT=0;map.on("error",()=>{const t=Date.now();if(t-errT>15000){errN=0;errT=t;}if(++errN===40&&!toast.err){toast.err=1;toast("Connessione lenta: alcune immagini della mappa non arrivano");}});
 ["mousedown","touchstart","wheel"].forEach(ev=>map.getCanvas().addEventListener(ev,()=>interacting=true,{passive:true}));
 window.__cdv={map,select,CL};
 })();
