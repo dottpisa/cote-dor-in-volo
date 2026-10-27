@@ -54,8 +54,8 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 .btn{border:0;background:var(--chip);border-radius:11px;padding:10px 13px;font-weight:700;font-size:13.5px;display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap}
 .btn.pri{background:var(--pinot);color:var(--pinot-ink)}
 .btn svg{width:15px;height:15px}
-#speed{font-family:var(--f-data);font-weight:500;min-width:46px;justify-content:center}
-#prog{flex:1;min-width:0;accent-color:var(--pinot)}
+.btn.search{flex:1;min-width:0;justify-content:flex-start;font-weight:500;color:var(--muted);background:var(--chip)}
+.btn.search span{overflow:hidden;text-overflow:ellipsis}
 
 /* scheda */
 #card{position:fixed;z-index:7;left:0;right:0;bottom:calc(74px + var(--sab));padding:0 var(--sar) 0 var(--sal);pointer-events:none}
@@ -172,10 +172,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </div></section>
 
 <nav id="dock"><div id="dockin">
-  <button class="btn pri" id="play" aria-label="Avvia o metti in pausa il volo"></button>
-  <button class="btn" id="speed" aria-label="Velocità del volo">1×</button>
-  <input id="prog" type="range" min="0" max="1000" value="0" aria-label="Posizione lungo la Côte">
-  <button class="btn" id="open" aria-label="Elenco dei climats"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 4h10M3 8h10M3 12h10"/></svg>Elenco</button>
+  <button class="btn search" id="open" aria-label="Cerca un climat o una cantina"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><span>Cerca un climat o una cantina</span></button>
 </div></nav>
 <div id="toast" style="opacity:0"></div>
 
@@ -363,7 +360,7 @@ const SAT_STYLE={version:8,glyphs:GLYPHS,sources:{ortho:{type:"raster",tiles:[OR
   layers:[{id:"bg",type:"background",paint:{"background-color":"#3a3a32"}},{id:"ortho",type:"raster",source:"ortho",paint:{"raster-saturation":-.08,"raster-contrast":.05}}]};
 let mode=store.get("cdv-layer","sat"),terrainOn=true;
 const start=poseAt(140);
-const map=new maplibregl.Map({container:"map",style:mode==="sat"?SAT_STYLE:PLAN_STYLE,center:start.center,zoom:13.6,pitch:62,bearing:start.bearing,maxPitch:78,
+const map=new maplibregl.Map({container:"map",style:mode==="sat"?SAT_STYLE:PLAN_STYLE,center:start.center,zoom:12.6,pitch:58,bearing:start.bearing,maxPitch:78,
   attributionControl:false,hash:false,dragRotate:true,touchPitch:true,fadeDuration:150});
 map.addControl(new maplibregl.AttributionControl({compact:true,customAttribution:'Climats: <a href="https://www.data.gouv.fr/fr/datasets/5aaf6b7ec751df67b0d7a87f/" target="_blank" rel="noopener">INAO</a> · Rilievo: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> · Cantine: INSEE SIRENE, © OpenStreetMap'}),"bottom-right");
 map.touchZoomRotate.enableRotation();
@@ -415,26 +412,7 @@ map.on("click",e=>{if(prodOn){const b=8,pf=map.queryRenderedFeatures([[e.point.x
   const fs=map.queryRenderedFeatures(e.point,{layers:["cl-fill","lab-gc","lab-note","lab-1c"]});if(!fs.length)return;
   let best=null;fs.forEach(f=>{const c=CL[f.id];if(c&&(!best||c.ha<best.ha))best=c;});if(best)select(best.id);});
 
-/* ---------- volo ---------- */
-let flying=false,speed=1,u=140,lastT=0,interacting=false;
-const RATE=PATH.length/190; // ~3 minuti a 1×
-function flyFrame(t){if(!flying)return;const dt=lastT?Math.min(.06,(t-lastT)/1000):0;lastT=t;
-  u+=dt*RATE*speed;if(u>=PATH.length-1.001){u=PATH.length-1.001;setFlying(false);}
-  const p=poseAt(u);map.jumpTo({center:p.center,bearing:p.bearing,pitch:62,zoom:13.6});
-  if((t|0)%5===0)$("#prog").value=Math.round(u/(PATH.length-1)*1000);
-  requestAnimationFrame(flyFrame);}
-function setFlying(on){flying=on;lastT=0;syncPlay();if(on){closeCard(true);requestAnimationFrame(flyFrame);}}
-const ICON_PLAY='<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>',ICON_PAUSE='<svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z"/></svg>';
-function syncPlay(){$("#play").innerHTML=flying?ICON_PAUSE+"Pausa":ICON_PLAY+(u>141?"Riprendi":"Vola");}
-$("#play").onclick=()=>{if(flying){setFlying(false);return;}
-  if(sel>=0){const c=CL[sel];u=Math.max(0,c.u-25);}
-  else if(!nearPath()){const ctr=map.getCenter();u=Math.max(0,nearestU(ctr.lng,ctr.lat)-10);}
-  const p=poseAt(u);map.flyTo({center:p.center,bearing:p.bearing,pitch:62,zoom:13.6,duration:reduceMotion?0:1600,essential:true});
-  map.once("moveend",()=>setFlying(true));};
-function nearPath(){const p=poseAt(u),c=map.getCenter();return Math.abs(c.lng-p.center[0])<.003&&Math.abs(c.lat-p.center[1])<.003;}
-$("#speed").onclick=e=>{speed=speed===1?2:speed===2?4:1;e.currentTarget.textContent=speed+"×";};
-$("#prog").oninput=e=>{u=e.target.value/1000*(PATH.length-1.001);const p=poseAt(u);if(!flying){map.jumpTo({center:p.center,bearing:p.bearing,pitch:62,zoom:13.6});closeCard(true);}};
-["dragstart","rotatestart","pitchstart","zoomstart"].forEach(ev=>map.on(ev,e=>{if(e.originalEvent&&flying)setFlying(false);}));
+let interacting=false;
 
 /* commune corrente */
 let lastComm="";
@@ -453,8 +431,8 @@ $("#t3d").onclick=e=>{terrainOn=!terrainOn;e.currentTarget.setAttribute("aria-pr
 function syncProdBtn(){$("#tprod").setAttribute("aria-pressed",prodOn);}
 $("#tprod").onclick=()=>{prodOn=!prodOn;store.set("cdv-prod",prodOn);syncProdBtn();["prod-dot","prod-lab"].forEach(l=>{if(map.getLayer(l))map.setLayoutProperty(l,"visibility",prodOn?"visible":"none");});toast(prodOn?"Cantine visibili":"Cantine nascoste");};
 syncProdBtn();
-$("#compass").onclick=()=>{setFlying(false);map.easeTo({bearing:0,pitch:0,duration:reduceMotion?0:700});};
-$("#locate").onclick=()=>{setFlying(false);closeCard();map.flyTo({center:[4.86,47.08],zoom:10.3,pitch:45,bearing:-25,duration:reduceMotion?0:1800,essential:true});};
+$("#compass").onclick=()=>{map.easeTo({bearing:0,pitch:0,duration:reduceMotion?0:700});};
+$("#locate").onclick=()=>{closeCard();map.flyTo({center:[4.86,47.08],zoom:10.3,pitch:45,bearing:-25,duration:reduceMotion?0:1800,essential:true});};
 
 /* ---------- altitudine ed esposizione dai dati DEM ---------- */
 const tileCache=new Map();
@@ -492,7 +470,7 @@ let ORD=null;const orderNS=()=>ORD||(ORD=CL.slice().sort((a,b)=>a.u-b.u||b.lp[1]
 function generic(c){return c.tier==="1C"?"Climat classificato Premier Cru nella denominazione "+c.app.replace(/^Ile /,"Île ")+". La scheda descrittiva non è ancora disponibile; superficie, quota ed esposizione vengono dai dati ufficiali.":
   c.tier==="GCL"?"Lieu-dit del Grand Cru Corton, l’unico Grand Cru rosso della Côte de Beaune. In etichetta può seguire il nome Corton.":"Grand Cru della Côte d’Or.";}
 function cardPadding(){const wide=innerWidth>=900;const h=wide?0:Math.min(innerHeight*.56,560)+90;return wide?{top:60,bottom:110,left:60,right:470}:{top:110,bottom:Math.min(h,innerHeight*.62),left:30,right:30};}
-function select(id,opts={}){const c=CL[id];if(!c)return;setFlying(false);
+function select(id,opts={}){const c=CL[id];if(!c)return;
   if(selP>=0){map.setFeatureState({source:"prod",id:selP},{sel:false});selP=-1;}
   if(sel>=0)map.setFeatureState({source:"climats",id:sel},{sel:false});sel=id;map.setFeatureState({source:"climats",id},{sel:true});map.setFilter("cl-sel",["==",["id"],id]);
   const bearing=poseAt(c.u).bearing;
@@ -548,7 +526,7 @@ function bindNotes(key,rerender){
 function clearSel(){if(sel>=0){map.setFeatureState({source:"climats",id:sel},{sel:false});map.setFilter("cl-sel",["==",["id"],-1]);}sel=-1;
   if(selP>=0&&map.getSource("prod"))map.setFeatureState({source:"prod",id:selP},{sel:false});selP=-1;}
 function nearestProds(p,k){return PR.filter(q=>q!==p).map(q=>[q,Math.hypot((q.lon-p.lon)*.68,q.lat-p.lat)]).sort((a,b)=>a[1]-b[1]).slice(0,k).map(x=>x[0]);}
-function selectProd(id,opts={}){const p=PR[id];if(!p)return;setFlying(false);
+function selectProd(id,opts={}){const p=PR[id];if(!p)return;
   if(!prodOn){prodOn=true;store.set("cdv-prod",true);syncProdBtn();["prod-dot","prod-lab"].forEach(l=>map.getLayer(l)&&map.setLayoutProperty(l,"visibility","visible"));}
   clearSel();selP=id;map.setFeatureState({source:"prod",id},{sel:true});
   const bearing=poseAt(nearestU(p.lon,p.lat)).bearing;
@@ -622,16 +600,15 @@ function renderRows(){if(lmode==="pr")return renderProdRows();const q=norm($("#q
   $("#rows").innerHTML=html||'<p style="padding:14px 10px;color:var(--muted)">'+(filt==="mine"?"Non hai ancora preferiti o note. Aprili dalla scheda di un climat.":"Nessun climat corrisponde alla ricerca.")+'</p>';
   $("#lcount").textContent=items.length;}
 $("#rows").onclick=e=>{const b=e.target.closest(".it");if(!b)return;if(b.dataset.p!==undefined)selectProd(+b.dataset.p);else select(+b.dataset.i);};
-$("#open").onclick=()=>{const l=$("#list");l.hidden=!l.hidden;if(!l.hidden){$("#card").hidden=true;document.body.classList.add("side");setFlying(false);renderRows();}else document.body.classList.remove("side");};
+$("#open").onclick=()=>{const l=$("#list");l.hidden=!l.hidden;if(!l.hidden){$("#card").hidden=true;document.body.classList.add("side");renderRows();if(innerWidth>=900)$("#q").focus();}else document.body.classList.remove("side");};
 $("#lclose").onclick=()=>{$("#list").hidden=true;document.body.classList.remove("side");};
 addEventListener("keydown",e=>{if(e.key==="Escape"){if(!$("#list").hidden)$("#lclose").click();else if(!$("#card").hidden)closeCard();}});
 
 /* ---------- avvio ---------- */
-syncPlay();
 let booted=false;map.once("style.load",()=>setTimeout(boot,2500));
 map.on("load",boot);
-function boot(){if(booted)return;booted=true;updateNow();const h=decodeURIComponent((location.hash||"").slice(1));const c=h&&CL.find(x=>x.slug===h);const pp=h&&PR.find(x=>x.slug===h);
-  if(c)select(c.id,{instant:true});else if(pp)selectProd(pp.id,{instant:true});else if(!reduceMotion)setTimeout(()=>{if(!interacting&&sel<0&&selP<0&&$("#list").hidden&&$("#card").hidden)setFlying(true);},1800);}
+function boot(){if(booted)return;booted=true;updateNow();const at=document.querySelector(".maplibregl-ctrl-attrib");if(at){at.classList.remove("maplibregl-compact-show");at.removeAttribute("open");}const h=decodeURIComponent((location.hash||"").slice(1));const c=h&&CL.find(x=>x.slug===h);const pp=h&&PR.find(x=>x.slug===h);
+  if(c)select(c.id,{instant:true});else if(pp)selectProd(pp.id,{instant:true});}
 let errN=0,errT=0;map.on("error",()=>{const t=Date.now();if(t-errT>15000){errN=0;errT=t;}if(++errN===40&&!toast.err){toast.err=1;toast("Connessione lenta: alcune immagini della mappa non arrivano");}});
 addEventListener("hashchange",()=>{const h=decodeURIComponent((location.hash||"").slice(1));const c=h&&CL.find(x=>x.slug===h);if(c&&c.id!==sel)return select(c.id);const pp=h&&PR.find(x=>x.slug===h);if(pp&&pp.id!==selP)selectProd(pp.id);});
 ["mousedown","touchstart","wheel"].forEach(ev=>map.getCanvas().addEventListener(ev,()=>interacting=true,{passive:true}));
