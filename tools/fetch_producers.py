@@ -1,68 +1,84 @@
-"""Scarica le imprese vitivinicole della Côte d'Or (SIRENE, API Recherche d'Entreprises)
-e le cantine segnate su OpenStreetMap. Salva i dati grezzi in out/."""
-import json, os, time, urllib.parse, urllib.request, sys
-OUT = "out"
-os.makedirs(OUT, exist_ok=True)
-T0 = time.time()
-LOG = []
+"""Estrae dal registro SIRENE completo (INSEE, Licence Ouverte) le imprese vitivinicole
+attive della Côte d'Or e delle Maranges, e scarica le cantine segnate su OpenStreetMap.
+Scrive solo i dati filtrati in out/."""
+import csv, io, json, os, sys, time, urllib.parse, urllib.request, zipfile
+
+OUT = "out"; os.makedirs(OUT, exist_ok=True)
+T0 = time.time(); LOG = []
 def log(*a):
-    line = " ".join(str(x) for x in a)
-    print(line, flush=True); LOG.append(f"{time.time()-T0:7.1f}s {line}")
-    open("out/log.txt", "w").write("\n".join(LOG))
-
+    line = " ".join(str(x) for x in a); print(line, flush=True)
+    LOG.append(f"{time.time()-T0:7.1f}s {line}"); open(f"{OUT}/log.txt", "w").write("\n".join(LOG))
 UA = {"User-Agent": "cote-dor-in-volo/1.0 (github.com/dottpisa/cote-dor-in-volo)"}
+def fetch(url, data=None):
+    req = urllib.request.Request(url, data=data, headers=UA)
+    return urllib.request.urlopen(req, timeout=300)
+csv.field_size_limit(10**8)
 
-def get(url, data=None, tries=5):
-    for k in range(tries):
-        try:
-            req = urllib.request.Request(url, data=data, headers=UA)
-            with urllib.request.urlopen(req, timeout=60) as r:
-                return json.loads(r.read().decode("utf-8"))
-        except Exception as e:
-            log("retry", k, url[:160], repr(e))
-            time.sleep(2 + 3 * k)
-    raise RuntimeError("failed " + url)
+ds = json.load(fetch("https://www.data.gouv.fr/api/1/datasets/5b7ffc618b4c4169d30727e0/"))
+res = {r["title"]: r["url"] for r in ds["resources"]}
+log("risorse:", list(res)[:30])
+def pick(prefix):
+    c = [t for t in res if t.lower().startswith(prefix.lower()) and "histor" not in t.lower() and "parquet" not in t.lower()]
+    c.sort(key=len); return res[c[0]] if c else None
+U_ET = pick("Sirene : Fichier StockEtablissement") or pick("StockEtablissement")
+U_UL = pick("Sirene : Fichier StockUniteLegale") or pick("StockUniteLegale")
+if not U_ET:
+    U_ET = next(u for t, u in res.items() if "StockEtablissement_utf8" in u and "Histo" not in u and "Liens" not in u)
+if not U_UL:
+    U_UL = next(u for t, u in res.items() if "StockUniteLegale_utf8" in u and "Histo" not in u)
+log("etab:", U_ET); log("ul:", U_UL)
 
-QUERIES = []
-for naf in ["01.21Z", "11.02B", "46.34Z"]:
-    QUERIES.append({"activite_principale": naf, "departement": "21"})
-    QUERIES.append({"activite_principale": naf, "code_postal": "71150"})
+def download(url, path):
+    with fetch(url) as r, open(path, "wb") as f:
+        while True:
+            b = r.read(1 << 22)
+            if not b: break
+            f.write(b)
+    log("scaricato", path, os.path.getsize(path) // 2**20, "MB")
 
-results = {}
-probe = get("https://recherche-entreprises.api.gouv.fr/search?" + urllib.parse.urlencode({"activite_principale": "01.21Z", "departement": "21", "per_page": 2, "page": 1}))
-json.dump(probe, open(f"{OUT}/probe.json", "w"), ensure_ascii=False, indent=1)
-log("probe total_results", probe.get("total_results"), "total_pages", probe.get("total_pages"))
-for q in QUERIES:
-    page = 1
-    while True:
-        params = dict(q, page=page, per_page=25, etat_administratif="A")
-        if time.time() - T0 > 1200:
-            log("tempo scaduto, mi fermo"); break
-        url = "https://recherche-entreprises.api.gouv.fr/search?" + urllib.parse.urlencode(params)
-        d = get(url)
-        for r in d.get("results", []):
-            results[r["siren"]] = r
-        tp = d.get("total_pages", 1)
-        log(q, "page", page, "/", tp, "tot", d.get("total_results"))
-        if page >= tp or page >= 400:
-            break
-        page += 1
-        time.sleep(0.2)
+def rows(path):
+    z = zipfile.ZipFile(path); name = [n for n in z.namelist() if n.endswith(".csv")][0]
+    with z.open(name) as f:
+        yield from csv.DictReader(io.TextIOWrapper(f, encoding="utf-8", newline=""))
 
-json.dump(list(results.values()), open(f"{OUT}/sirene.json", "w"), ensure_ascii=False)
-log("sirene unita legali:", len(results))
+NAF = {"01.21Z", "11.02A", "11.02B", "46.34Z"}
+download(U_ET, "et.zip")
+etabs = []; sirens = set(); n = 0
+for r in rows("et.zip"):
+    n += 1
+    cc = r.get("codeCommuneEtablissement", ""); cp = r.get("codePostalEtablissement", "")
+    if not (cc.startswith("21") or cp == "71150"): continue
+    if r.get("etatAdministratifEtablissement") != "A": continue
+    if r.get("activitePrincipaleEtablissement") not in NAF: continue
+    keep = {k: r.get(k, "") for k in ["siren", "siret", "statutDiffusionEtablissement", "etablissementSiege", "dateCreationEtablissement",
+        "trancheEffectifsEtablissement", "numeroVoieEtablissement", "typeVoieEtablissement", "libelleVoieEtablissement",
+        "complementAdresseEtablissement", "codePostalEtablissement", "libelleCommuneEtablissement", "codeCommuneEtablissement",
+        "coordonneeLambertAbscisseEtablissement", "coordonneeLambertOrdonneeEtablissement", "enseigne1Etablissement",
+        "enseigne2Etablissement", "denominationUsuelleEtablissement", "activitePrincipaleEtablissement"]}
+    etabs.append(keep); sirens.add(keep["siren"])
+log("righe etab lette", n, "tenute", len(etabs)); os.remove("et.zip")
+
+download(U_UL, "ul.zip")
+uls = {}
+for r in rows("ul.zip"):
+    if r.get("siren") in sirens:
+        uls[r["siren"]] = {k: r.get(k, "") for k in ["siren", "statutDiffusionUniteLegale", "denominationUniteLegale", "denominationUsuelle1UniteLegale",
+            "sigleUniteLegale", "nomUniteLegale", "nomUsageUniteLegale", "prenomUsuelUniteLegale", "prenom1UniteLegale",
+            "categorieJuridiqueUniteLegale", "activitePrincipaleUniteLegale", "trancheEffectifsUniteLegale", "categorieEntreprise",
+            "dateCreationUniteLegale", "etatAdministratifUniteLegale"]}
+log("unita legali", len(uls)); os.remove("ul.zip")
+json.dump({"etablissements": etabs, "unites": uls}, open(f"{OUT}/sirene.json", "w"), ensure_ascii=False)
 
 q = """[out:json][timeout:120];
 (nwr["craft"="winery"](46.86,4.60,47.33,5.08);
  nwr["shop"="wine"](46.86,4.60,47.33,5.08);
  nwr["tourism"="wine_cellar"](46.86,4.60,47.33,5.08););
 out center tags;"""
-osm = None
+osm = {"elements": []}
 for ep in ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]:
     try:
-        osm = get(ep, data=urllib.parse.urlencode({"data": q}).encode())
-        break
+        osm = json.load(fetch(ep, data=urllib.parse.urlencode({"data": q}).encode())); break
     except Exception as e:
         log("overpass fail", ep, repr(e))
-json.dump(osm or {"elements": []}, open(f"{OUT}/osm.json", "w"), ensure_ascii=False)
-log("osm elementi:", len((osm or {}).get("elements", [])))
+json.dump(osm, open(f"{OUT}/osm.json", "w"), ensure_ascii=False)
+log("osm elementi", len(osm.get("elements", [])), "fine")
